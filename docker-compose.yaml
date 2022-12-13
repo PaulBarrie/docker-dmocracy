@@ -1,0 +1,100 @@
+version: '3.5'
+
+services:
+  traefik:
+    image: "traefik:v2.7"
+    container_name: "traefik"
+    networks:
+      - backend
+      - frontend
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "traefik.http.middlewares.testHeader.headers.customrequestheaders.Access-Control-Allow-Origin: http://dmocracy.localhost"
+      - "traefik.http.middlewares.testHeader.headers.customrequestheaders.Access-Control-Allow-Credentials: true"
+
+    ports:
+      - "80:80"
+      - "8082:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+
+  app:
+    build: 
+      context: ./app
+      dockerfile: Dockerfile
+      cache_from:
+        - "node:lts-alpine3.15"
+    entrypoint: npm
+    command: ["run","dev"]
+    container_name: dmocracy-app
+    environment:
+      - API_URL=http://api.dmocracy.localhost
+      - CHOKIDAR_USEPOLLING=true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dmocracy-app.rule=Host(`dmocracy.localhost`)"
+      - "traefik.http.routers.dmocracy-app.entrypoints=web"
+    ports:
+      - "3000:3000"
+    networks:
+      - frontend
+    volumes:
+      - ./app:/app
+      - /app/node_modules
+
+  api:
+    container_name: dmocracy-api
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+      args:
+        - PORT=8080
+    entrypoint: npm
+    command: ["run", "start:dev"]
+    environment:
+      POSTGRES_USER: bc-postgres
+      POSTGRES_PASSWORD: bcpg-password
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: bc-postgres
+      POSTGRES_PORT: 5432
+      CONTRACT_ADDRESS: "https://testnet.snowtrace.io/address/0x7B3ab7025E21b496A942083600d05bBF4aF7D3B1"
+      NETWORK: "https://testnet.snowtrace.io"
+    ports:
+      - "8080:8080"
+    networks:
+      - backend
+      - frontend
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dmocracy-api.rule=Host(`api.dmocracy.localhost`)"
+      - "traefik.http.routers.dmocracy-api.entrypoints=web"
+
+  postgres:
+    container_name: postgres
+    image: postgres
+    environment:
+      POSTGRES_USER: bc-postgres
+      POSTGRES_PASSWORD: bcpg-password
+      PGDATA: /data/postgres
+    volumes:
+       - postgres:/data/postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - backend
+    restart: unless-stopped
+  
+
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
+volumes:
+  postgres:
